@@ -9,9 +9,13 @@ LRELU_SLOPE = 0.1
 
 
 class ResBlock1(torch.nn.Module):
-    def __init__(self, h, channels, kernel_size=3, dilation=(1, 3, 5)):
+    def __init__(self, h, channels, kernel_size=3, dilation=(1, 3, 5), film_channels = 0):
         super(ResBlock1, self).__init__()
         self.h = h
+        if film_channels > 0: 
+            self.film_channels = film_channels
+            self.conv_film = weight_norm(Conv1d(in_channels=film_channels, out_channels=channels*2, kernel_size=1, 
+                                                stride=1, padding=0))
         self.convs1 = nn.ModuleList([
             weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[0],
                                padding=get_padding(kernel_size, dilation[0]))),
@@ -32,12 +36,16 @@ class ResBlock1(torch.nn.Module):
         ])
         self.convs2.apply(init_weights)
 
-    def forward(self, x):
+    def forward(self, x, w):
         for c1, c2 in zip(self.convs1, self.convs2):
             xt = F.leaky_relu(x, LRELU_SLOPE)
             xt = c1(xt)
             xt = F.leaky_relu(xt, LRELU_SLOPE)
             xt = c2(xt)
+            # Add the feature wise linear modulation
+            if self.film_channels > 0:
+                a, b = torch.chunk(self.conv_film(w), 2, dim=1)
+                xt = a * xt + b
             x = xt + x
         return x
 
@@ -280,4 +288,3 @@ def generator_loss(disc_outputs):
         loss += l
 
     return loss, gen_losses
-
