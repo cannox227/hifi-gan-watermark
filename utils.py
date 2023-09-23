@@ -55,3 +55,4 @@ def scan_checkpoint(cp_dir, prefix):
     if len(cp_list) == 0:
         return None
     return sorted(cp_list)[-1]
+

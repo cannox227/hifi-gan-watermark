@@ -9,12 +9,14 @@ LRELU_SLOPE = 0.1
 
 
 class ResBlock1(torch.nn.Module):
-    def __init__(self, h, channels, kernel_size=3, dilation=(1, 3, 5), film_channels = 0):
+    def __init__(self, h, channels, kernel_size=3, dilation=(1, 3, 5)):
         super(ResBlock1, self).__init__()
         self.h = h
-        if film_channels > 0: 
-            self.film_channels = film_channels
-            self.conv_film = weight_norm(Conv1d(in_channels=film_channels, out_channels=channels*2, kernel_size=1, 
+        # If film channels are specified in the configuration file
+        # FILM is applied to the residual block
+        if h.film_channels > 0: 
+            self.film_channels = h.film_channels
+            self.conv_film = weight_norm(Conv1d(in_channels=self.film_channels, out_channels=channels*2, kernel_size=1, 
                                                 stride=1, padding=0))
         self.convs1 = nn.ModuleList([
             weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[0],
@@ -60,6 +62,12 @@ class ResBlock2(torch.nn.Module):
     def __init__(self, h, channels, kernel_size=3, dilation=(1, 3)):
         super(ResBlock2, self).__init__()
         self.h = h
+        # If film channels are specified in the configuration file
+        # FILM is applied to the residual block
+        if h.film_channels > 0: 
+            self.film_channels = h.film_channels
+            self.conv_film = weight_norm(Conv1d(in_channels=self.film_channels, out_channels=channels*2, kernel_size=1, 
+                                                stride=1, padding=0))
         self.convs = nn.ModuleList([
             weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[0],
                                padding=get_padding(kernel_size, dilation[0]))),
@@ -68,10 +76,15 @@ class ResBlock2(torch.nn.Module):
         ])
         self.convs.apply(init_weights)
 
-    def forward(self, x):
+    def forward(self, x, w):
         for c in self.convs:
             xt = F.leaky_relu(x, LRELU_SLOPE)
             xt = c(xt)
+            x = xt + x
+            # Add the feature wise linear modulation
+            if self.film_channels > 0:
+                a, b = torch.chunk(self.conv_film(w), 2, dim=1)
+                xt = a * xt + b
             x = xt + x
         return x
 
@@ -88,8 +101,10 @@ class Generator(torch.nn.Module):
         self.num_upsamples = len(h.upsample_rates)
         self.conv_pre = weight_norm(Conv1d(80, h.upsample_initial_channel, 7, 1, padding=3))
         resblock = ResBlock1 if h.resblock == '1' else ResBlock2
-
+        self.original_fingerprint = None
+        
         self.ups = nn.ModuleList()
+
         for i, (u, k) in enumerate(zip(h.upsample_rates, h.upsample_kernel_sizes)):
             self.ups.append(weight_norm(
                 ConvTranspose1d(h.upsample_initial_channel//(2**i), h.upsample_initial_channel//(2**(i+1)),
@@ -100,12 +115,16 @@ class Generator(torch.nn.Module):
             ch = h.upsample_initial_channel//(2**(i+1))
             for j, (k, d) in enumerate(zip(h.resblock_kernel_sizes, h.resblock_dilation_sizes)):
                 self.resblocks.append(resblock(h, ch, k, d))
-
+                
         self.conv_post = weight_norm(Conv1d(ch, 1, 7, 1, padding=3))
         self.ups.apply(init_weights)
         self.conv_post.apply(init_weights)
 
     def forward(self, x):
+        self.bernoulli = BernoulliFingerprintEncoder(batch_size=x.shape[0],
+                                                     probability=0.5)
+        self.fingerprint = self.bernoulli()
+        self.original_fingerprint = self.bernoulli.get_original_fingerprint()
         x = self.conv_pre(x)
         for i in range(self.num_upsamples):
             x = F.leaky_relu(x, LRELU_SLOPE)
@@ -113,9 +132,9 @@ class Generator(torch.nn.Module):
             xs = None
             for j in range(self.num_kernels):
                 if xs is None:
-                    xs = self.resblocks[i*self.num_kernels+j](x)
+                    xs = self.resblocks[i*self.num_kernels+j](x, self.fingerprint)
                 else:
-                    xs += self.resblocks[i*self.num_kernels+j](x)
+                    xs += self.resblocks[i*self.num_kernels+j](x, self.fingerprint)
             x = xs / self.num_kernels
         x = F.leaky_relu(x)
         x = self.conv_post(x)
@@ -290,34 +309,37 @@ def generator_loss(disc_outputs):
     return loss, gen_losses
 
 class FingerprintDecoder(torch.nn.Module):
-    def __init__(self, input_channels, hidden_layers, time):
+    def __init__(self, input_channels=256, hidden_layers=512):
         super(FingerprintDecoder, self).__init__()
 
         self.fingerprint_size = 128
+        self.threshold = 0.5
         self.linears = nn.ModuleList([
-            torch.nn.Linear(input_channels*time, hidden_layers),
-            torch.nn.Linear(hidden_layers, hidden_layers),
-            torch.nn.Linear(hidden_layers, self.fingerprint_size)
+            torch.nn.Linear(input_channels, hidden_layers),
+            torch.nn.Linear(hidden_layers, hidden_layers // 2),
+            torch.nn.Linear(hidden_layers // 2, self.fingerprint_size)
         ])
         
         self.lrelu = torch.nn.LeakyReLU()
+        self.sigmoid = torch.nn.Sigmoid()
 
     def forward(self, x):
         x = x.flatten(1)
         for l in self.linears:
             if l == self.linears[-1]:
-                x = l(x)
+                x = self.sigmoid(l(x))
             else:
                 x = self.lrelu(l(x))
+        x  = (x >= self.threshold).float()
         return x
     
 class BernoulliFingerprintEncoder(torch.nn.Module):
-    def __init__(self, probability=0.5):
+    def __init__(self, batch_size, probability=0.5):
         super(BernoulliFingerprintEncoder, self).__init__()
-        self.shape = (1, 128)
+        self.bern_shape = (batch_size, 128)
         self.hidden_size = 128
-        self.output_size = 512
-        self.original_value = 0
+        self.output_size = 256
+        self.original_fingerprint = None
         self.linears =  self.linears = nn.ModuleList([
             torch.nn.Linear(self.hidden_size, self.hidden_size*2),
             torch.nn.Linear(self.hidden_size*2, self.output_size)
@@ -326,8 +348,12 @@ class BernoulliFingerprintEncoder(torch.nn.Module):
         self.prob = probability
 
     def forward(self):
-        x = torch.bernoulli(torch.full(self.shape, self.prob))
-        x = self.relu(self.linears[0](x))
+        self.original_fingerprint = torch.bernoulli(torch.full(self.bern_shape, self.prob))
+        
+        x = self.relu(self.linears[0](self.original_fingerprint))
         x = self.linears[1](x)
-        return x
+        return x.unsqueeze(2)
+    
+    def get_original_fingerprint(self):
+        return self.original_fingerprint
         

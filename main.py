@@ -1,28 +1,36 @@
 from models import *
+from models import Generator
 import torch
 from utils import *
+import json
+from env import AttrDict
+from torchsummary import summary
+def get_generator_from_config(config_file):
+    with open(config_file, "r") as config_file:
+        config = json.load(config_file)
+        params = AttrDict(config)
+
+    generator = Generator(h=params)
+    return generator
 
 def main():
-    batch_size = 1
+    batch_size = 10
     channels = 512
-    time = 1024
-
-    x = torch.randn(batch_size, channels, time)
+    time = 1
     w_channels = 256
-    res = ResBlock1(h=1, channels=512, kernel_size=3, dilation=(1, 3, 5), film_channels = w_channels) 
-    w = torch.randn(batch_size, w_channels, 1)
-    y = res(x, w)
-    print(f"Image with watermark shape: {y.shape}")
-
-    decoder = FingerprintDecoder(input_channels=y.shape[1], hidden_layers=512, time=y.shape[2])
-    z = decoder(y)
-    print(f"Fingerprint obtained {z.shape}")
-
-    encoder = BernoulliFingerprintEncoder(probability=0.5)
-    fingerprint_enc = encoder()
+    mel_spectogram_channels = 80
+    config_file = "config_custom.json"
+    generator = get_generator_from_config(config_file)
+    fake_tensor = torch.zeros(batch_size, mel_spectogram_channels, time)
+    waveform = generator(fake_tensor)
+    print(f"Waveform shape {waveform.shape}")
     
-    print(f"\nFingerprint encoded {fingerprint_enc.shape}, \nEncoded val: {fingerprint_enc}")
-
+    decoder = FingerprintDecoder(input_channels=waveform.shape[2], hidden_layers=512)
+    fingerprint = decoder(waveform)
+    print("Decoder output shape: ",fingerprint.shape)
+    
+    accuracy = (fingerprint == generator.original_fingerprint).float().mean()
+    print(f"Accuracy: {accuracy}")
 
 if __name__ == '__main__':   
    main()
