@@ -288,3 +288,46 @@ def generator_loss(disc_outputs):
         loss += l
 
     return loss, gen_losses
+
+class FingerprintDecoder(torch.nn.Module):
+    def __init__(self, input_channels, hidden_layers, time):
+        super(FingerprintDecoder, self).__init__()
+
+        self.fingerprint_size = 128
+        self.linears = nn.ModuleList([
+            torch.nn.Linear(input_channels*time, hidden_layers),
+            torch.nn.Linear(hidden_layers, hidden_layers),
+            torch.nn.Linear(hidden_layers, self.fingerprint_size)
+        ])
+        
+        self.lrelu = torch.nn.LeakyReLU()
+
+    def forward(self, x):
+        x = x.flatten(1)
+        for l in self.linears:
+            if l == self.linears[-1]:
+                x = l(x)
+            else:
+                x = self.lrelu(l(x))
+        return x
+    
+class BernoulliFingerprintEncoder(torch.nn.Module):
+    def __init__(self, probability=0.5):
+        super(BernoulliFingerprintEncoder, self).__init__()
+        self.shape = (1, 128)
+        self.hidden_size = 128
+        self.output_size = 512
+        self.original_value = 0
+        self.linears =  self.linears = nn.ModuleList([
+            torch.nn.Linear(self.hidden_size, self.hidden_size*2),
+            torch.nn.Linear(self.hidden_size*2, self.output_size)
+        ]) 
+        self.relu = torch.nn.ReLU()
+        self.prob = probability
+
+    def forward(self):
+        x = torch.bernoulli(torch.full(self.shape, self.prob))
+        x = self.relu(self.linears[0](x))
+        x = self.linears[1](x)
+        return x
+        
