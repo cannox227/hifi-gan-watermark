@@ -65,7 +65,7 @@ def inference(a):
 
             # Attentive decoder test
             fingerprint_size = 128 
-            ad = AttentiveDecoder(input_dim=y_g_hat.shape[2], output_dim=fingerprint_size)
+            ad = AttentiveDecoder(input_dim=y_g_hat.shape[2], output_dim=fingerprint_size).to(device)
             out = ad(y_g_hat)
             print("Attentive decoder shape: ", out.shape)
             print("Fingerprint tensor: ", out)
@@ -83,7 +83,7 @@ def inference(a):
             print(output_file)
 
             test_wav, sr = load_wav(output_file)
-            wav = torch.FloatTensor(wav).to(device)
+            wav = torch.FloatTensor(test_wav).to(device)
             print("Wav file after reading it with torchaudio: ", wav.shape)
             x = get_mel(wav.unsqueeze(0)) 
             print("Mel spectrogram shape: ", x.shape)
@@ -114,6 +114,7 @@ def main():
     else:
         device = torch.device('cpu')
 
+    print(f"Selected device: {device}")
     inference(a)
 
 
