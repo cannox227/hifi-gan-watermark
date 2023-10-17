@@ -3,6 +3,7 @@ import torch.nn.functional as F
 import torch.nn as nn
 from torch.nn import Conv1d, ConvTranspose1d, AvgPool1d, Conv2d
 from torch.nn.utils import weight_norm, remove_weight_norm, spectral_norm
+#from torch.nn.utils.parametrizations import weight_norm
 from utils import init_weights, get_padding
 
 LRELU_SLOPE = 0.1
@@ -47,7 +48,7 @@ class ResBlock1(torch.nn.Module):
             xt = c2(xt)
             # Add the feature wise linear modulation
             if self.film_channels > 0:
-                print("Sto usando film channels")
+                #print("Using film channels")
                 a, b = torch.chunk(self.conv_film(w), 2, dim=1)
                 xt = a * xt + b
                 x = xt + x
@@ -372,3 +373,114 @@ class BernoulliFingerprintEncoder(torch.nn.Module):
     def get_original_fingerprint(self):
         return self.original_fingerprint
         
+class SelfAttentionLayer(nn.Module):
+    def __init__(self, input_dim):
+        super(SelfAttentionLayer, self).__init__()
+        self.input_dim = input_dim
+        
+        # Define weight matrices for query, key, and value
+        self.W_q = nn.Linear(input_dim, input_dim)
+        self.W_k = nn.Linear(input_dim, input_dim)
+        self.W_v = nn.Linear(input_dim, input_dim)
+        
+    def forward(self, x):
+        # Compute query, key, and value
+        q = self.W_q(x)
+        k = self.W_k(x)
+        v = self.W_v(x)
+        
+        # Calculate scaled dot-product attention scores
+        attention_scores = torch.matmul(q, k.transpose(-2, -1)) / torch.sqrt(torch.tensor(self.input_dim, dtype=torch.float32))
+        
+        # Apply softmax to obtain attention weights
+        attention_weights = torch.nn.functional.softmax(attention_scores, dim=-1)
+        
+        # Compute weighted sum using attention weights
+        output = torch.matmul(attention_weights, v)
+        
+        return output
+
+class ConvFeatExtractor(torch.nn.Module):
+    def __init__(self, time_channel = 1, use_spectral_norm=False):
+        super(ConvFeatExtractor, self).__init__()
+        norm_f = weight_norm if use_spectral_norm == False else spectral_norm
+        self.output_dim = 1024
+        self.convs = nn.ModuleList([
+            norm_f(Conv1d(1, 128, 15, 1, padding=7)),
+            norm_f(Conv1d(128, 128, 41, 2, groups=4, padding=20)), 
+            norm_f(Conv1d(128, 256, 41, 2, groups=16, padding=20)), 
+            norm_f(Conv1d(256, 512, 41, 4, groups=16, padding=20)), 
+            norm_f(Conv1d(512, 1024, 41, 4, groups=16, padding=20)),
+            norm_f(Conv1d(1024, 1024, 41, 1, groups=16, padding=20)),
+            norm_f(Conv1d(1024, self.output_dim, 5, 1, padding=2)),
+        ])
+        # If input [1, 1, 224768]
+        # conv time out will be the third dimension divided by 
+        # the stride of each conv
+        self.conv_time_out = time_channel / (1*2*2*4*4*1*1)
+
+    def forward(self, x):
+        for l in self.convs:
+            x = l(x)
+            x = F.leaky_relu(x, LRELU_SLOPE)   
+            #print("x shape after all convs ",x.shape)         
+        return x
+
+
+class AttentiveDecoder(nn.Module):
+    # Input dim = mcpp channels
+    # Output dim = fingerprint size
+    def __init__(self, input_dim = 1, output_dim = 128):
+        super(AttentiveDecoder, self).__init__()
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        self.threshold = 0.5
+
+        self.feature_extractors = ConvFeatExtractor(time_channel=input_dim, use_spectral_norm=True)
+        self.conv_time = int(self.feature_extractors.conv_time_out)
+        self.attention = SelfAttentionLayer(input_dim=self.conv_time)
+
+        self.bottlenecks = nn.ModuleList([
+            nn.Linear(self.conv_time * 2, self.conv_time), #3512
+            nn.Linear(self.conv_time, self.conv_time // 2), #1756
+            nn.Linear(self.conv_time // 2, self.conv_time // 4),#878  
+            nn.Linear(self.conv_time // 4, self.output_dim) # 128
+        ])
+
+        assert self.output_dim == 128, "Output dim must be 128!"
+
+    def weighted_sd(self,inputs,attention_weights, mean):
+        el_mat_prod = torch.mul(inputs,attention_weights)
+        hadmard_prod = torch.mul(inputs,el_mat_prod)
+        # TODO why variance is used instead of std?
+        variance = torch.sum(hadmard_prod,1) - torch.mul(mean,mean)
+        return variance
+    
+    def stat_attn_pool(self,inputs,attention_weights):
+        el_mat_prod = torch.mul(inputs,attention_weights)
+        # Do we want to compute the mean of each sample over all the available features
+        mean = torch.mean(el_mat_prod,1)    #[1, 3512]
+        variance = self.weighted_sd(inputs,attention_weights,mean)
+        stat_pooling = torch.cat((mean,variance),1)
+        return stat_pooling
+    
+    # What is loss baby don't hurt me, don't hurt me, no more
+    def forward(self, y):#, y_hat):
+        # R = real
+        # G = generated
+        #print("\t>FW PASS: y shape before feature extractor", y.shape)
+        y = self.feature_extractors(y)
+        #print("\t>FW PASS: y shape after feature extractor", y.shape)
+        # Apply self attention
+        y_att_weights = self.attention(y)
+        #print("\t>FW PASS: att weigh dim: ", y_att_weights.shape)
+        # Apply stat pooling
+        y = self.stat_attn_pool(y, y_att_weights)
+        #print("\t>FW PASS: y shape after stat pooling", y.shape)
+        for mlp in self.bottlenecks:
+            y = mlp(y)
+            y = F.leaky_relu(y, LRELU_SLOPE)
+        #print("\t>FW PASS: y shape after mlp", y.shape)
+        y = torch.sigmoid(y)
+        y  = (y >= self.threshold).float()
+        return y

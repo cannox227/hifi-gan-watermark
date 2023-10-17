@@ -8,8 +8,9 @@ import torch
 from scipy.io.wavfile import write
 from env import AttrDict
 from meldataset import mel_spectrogram, MAX_WAV_VALUE, load_wav
-from models import Generator
+from models import Generator, AttentiveDecoder
 from utils import get_audio_padded
+import numpy as np
 
 h = None
 device = None
@@ -51,6 +52,8 @@ def inference(a):
         for i, filname in enumerate(filelist):
             # wav, sr = load_wav(os.path.join(a.input_wavs_dir, filname))
             # print(wav.shape, type(wav))
+
+            # Read wav file with torchaudio and apply padding
             wav, sr = get_audio_padded(os.path.join(a.input_wavs_dir, filname))
             print(wav.shape)
             wav = wav / MAX_WAV_VALUE
@@ -59,6 +62,18 @@ def inference(a):
             x = get_mel(wav.unsqueeze(0))
             y_g_hat = generator(x)
             print("Generated audio shape: ", y_g_hat.shape)
+
+            # Attentive decoder test
+            fingerprint_size = 128 
+            ad = AttentiveDecoder(input_dim=y_g_hat.shape[2], output_dim=fingerprint_size)
+            out = ad(y_g_hat)
+            print("Attentive decoder shape: ", out.shape)
+            print("Fingerprint tensor: ", out)
+            fing_arr = out.squeeze().cpu().numpy().astype('int16')
+            fing_conv = decimal_value = int(''.join(map(str, fing_arr.tolist())), 2)
+            print("Fingerprint converted: ", fing_conv)
+
+            # Convert generated audio to wav and write on disk
             audio = y_g_hat.squeeze()
             audio = audio * MAX_WAV_VALUE
             audio = audio.cpu().numpy().astype('int16')

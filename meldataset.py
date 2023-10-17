@@ -8,6 +8,7 @@ from librosa.util import normalize
 from scipy.io.wavfile import read
 from librosa.filters import mel as librosa_mel_fn
 
+# int16 max value
 MAX_WAV_VALUE = 32768.0
 
 
