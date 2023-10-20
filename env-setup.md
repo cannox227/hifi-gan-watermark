@@ -11,3 +11,17 @@ Conda version used: `conda 23.7.2`
 
 ## Test commands
     python3 inference.py --checkpoint_file LJ_FT_T2_V3/generator_v3
+
+
+## Tips
+### Export environment configuration
+If you add a new library or modify any library version you can re-export module list by using
+
+    conda env export --no-builds -n <env-name> > environment.yml
+
+### Training
+1. Download the dataset in the same project folder
+    wget http://data.keithito.com/data/speech/LJSpeech-1.1.tar.bz2
+2. Unzip it
+    tar -xf LJSpeech-1.1.tar.bz2 
+

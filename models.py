@@ -20,6 +20,7 @@ class ResBlock1(torch.nn.Module):
             self.film_channels = h.film_channels
             self.conv_film = weight_norm(Conv1d(in_channels=self.film_channels, out_channels=channels*2, kernel_size=1, 
                                                 stride=1, padding=0))
+            self.conv_film.apply(init_weights)
         self.convs1 = nn.ModuleList([
             weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[0],
                                padding=get_padding(kernel_size, dilation[0]))),
@@ -73,6 +74,7 @@ class ResBlock2(torch.nn.Module):
             self.film_channels = h.film_channels
             self.conv_film = weight_norm(Conv1d(in_channels=self.film_channels, out_channels=channels*2, kernel_size=1, 
                                                 stride=1, padding=0))
+            self.conv_film.apply(init_weights)
         self.convs = nn.ModuleList([
             weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[0],
                                padding=get_padding(kernel_size, dilation[0]))),
@@ -110,8 +112,10 @@ class Generator(torch.nn.Module):
         self.num_upsamples = len(h.upsample_rates)
         self.conv_pre = weight_norm(Conv1d(80, h.upsample_initial_channel, 7, 1, padding=3))
         resblock = ResBlock1 if h.resblock == '1' else ResBlock2
-        self.original_fingerprint = None
-        
+        self.film_channels = h.film_channels
+        if self.film_channels > 0:
+            self.original_fingerprint = None
+            self.bernoulli = BernoulliFingerprintEncoder(probability=0.5)
         self.ups = nn.ModuleList()
 
         for i, (u, k) in enumerate(zip(h.upsample_rates, h.upsample_kernel_sizes)):
@@ -130,10 +134,13 @@ class Generator(torch.nn.Module):
         self.conv_post.apply(init_weights)
 
     def forward(self, x):
-        self.bernoulli = BernoulliFingerprintEncoder(batch_size=x.shape[0],
-                                                     probability=0.5)
-        self.fingerprint = self.bernoulli()
-        self.original_fingerprint = self.bernoulli.get_original_fingerprint()
+        if self.film_channels > 0:
+            self.fingerprint = self.bernoulli(x)
+            # print("Bernoulli encodedn shape", self.fingerprint.shape)
+            self.original_fingerprint = self.bernoulli.get_original_fingerprint()
+        else:
+            self.fingerprint = None
+        # print("original fingerprint shape", self.original_fingerprint.shape)
         # print("X shape before conv pre",x.shape)
         x = self.conv_pre(x)
         # print("X shape after conv pre",x.shape)
@@ -163,6 +170,8 @@ class Generator(torch.nn.Module):
             l.remove_weight_norm()
         remove_weight_norm(self.conv_pre)
         remove_weight_norm(self.conv_post)
+
+        
 
 
 class DiscriminatorP(torch.nn.Module):
@@ -349,10 +358,11 @@ class FingerprintDecoder(torch.nn.Module):
         return x
     
 class BernoulliFingerprintEncoder(torch.nn.Module):
-    def __init__(self, batch_size, probability=0.5):
+    def __init__(self, probability=0.5):
         super(BernoulliFingerprintEncoder, self).__init__()
-        self.bern_shape = (batch_size, 128)
-        self.hidden_size = 128
+        #self.bern_shape = (batch_size, 128)
+        self.fingerprint_size = 32
+        self.hidden_size = self.fingerprint_size
         self.output_size = 256
         # output size should match the film_channels parameter
         self.original_fingerprint = None
@@ -363,9 +373,11 @@ class BernoulliFingerprintEncoder(torch.nn.Module):
         self.relu = torch.nn.ReLU()
         self.prob = probability
 
-    def forward(self):
+    def forward(self, x):
         # different fingerprint for each element in the batch
-        self.original_fingerprint = torch.bernoulli(torch.full(self.bern_shape, self.prob))
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        #self.original_fingerprint = torch.ones((x.shape[0], self.fingerprint_size)).to(device).requires_grad_(True)
+        self.original_fingerprint = torch.bernoulli(torch.full((x.shape[0],self.fingerprint_size), self.prob)).to(device)
         x = self.relu(self.linears[0](self.original_fingerprint))
         x = self.linears[1](x)
         return x.unsqueeze(2)
@@ -407,22 +419,22 @@ class ConvFeatExtractor(torch.nn.Module):
         self.output_dim = 1024
         self.convs = nn.ModuleList([
             norm_f(Conv1d(1, 128, 15, 1, padding=7)),
-            norm_f(Conv1d(128, 128, 41, 2, groups=4, padding=20)), 
-            norm_f(Conv1d(128, 256, 41, 2, groups=16, padding=20)), 
-            norm_f(Conv1d(256, 512, 41, 4, groups=16, padding=20)), 
-            norm_f(Conv1d(512, 1024, 41, 4, groups=16, padding=20)),
-            norm_f(Conv1d(1024, 1024, 41, 1, groups=16, padding=20)),
-            norm_f(Conv1d(1024, self.output_dim, 5, 1, padding=2)),
+            norm_f(Conv1d(128, 1024, 41, 2, groups=4, padding=20)), 
+            # norm_f(Conv1d(128, 256, 41, 2, groups=16, padding=20)), 
+            # norm_f(Conv1d(256, 512, 41, 4, groups=16, padding=20)), 
+            # norm_f(Conv1d(512, 1024, 41, 4, groups=16, padding=20)),
+            # norm_f(Conv1d(1024, 1024, 41, 1, groups=16, padding=20)),
+            # norm_f(Conv1d(1024, self.output_dim, 5, 1, padding=2)),
         ])
         # If input [1, 1, 224768]
         # conv time out will be the third dimension divided by 
         # the stride of each conv
-        self.conv_time_out = time_channel / (1*2*2*4*4*1*1)
-
+        self.conv_time_out = time_channel / (1*2)#(1*2*2*4*4*1*1)
     def forward(self, x):
-        for l in self.convs:
+        for i, l in enumerate(self.convs):
             x = l(x)
-            x = F.leaky_relu(x, LRELU_SLOPE)   
+            if i != len(self.convs)-1:
+                x = F.leaky_relu(x, LRELU_SLOPE)   
             #print("x shape after all convs ",x.shape)         
         return x
 
@@ -447,7 +459,7 @@ class AttentiveDecoder(nn.Module):
             nn.Linear(self.conv_time // 4, self.output_dim) # 128
         ])
 
-        assert self.output_dim == 128, "Output dim must be 128!"
+        assert self.output_dim == 32, "Output dim must be 32!"
 
     def weighted_sd(self,inputs,attention_weights, mean):
         el_mat_prod = torch.mul(inputs,attention_weights)
@@ -469,18 +481,27 @@ class AttentiveDecoder(nn.Module):
         # R = real
         # G = generated
         #print("\t>FW PASS: y shape before feature extractor", y.shape)
+        #print("Y inizio fw: ", y[0])
         y = self.feature_extractors(y)
+        #print("Y dopo feat extr: ", y[0]) 
         #print("\t>FW PASS: y shape after feature extractor", y.shape)
         # Apply self attention
         y_att_weights = self.attention(y)
+        #print("Att weights ", y_att_weights[0])
         #print("\t>FW PASS: att weigh dim: ", y_att_weights.shape)
         # Apply stat pooling
         y = self.stat_attn_pool(y, y_att_weights)
+        #print("Y dopo stat pooling ", y[0])
         #print("\t>FW PASS: y shape after stat pooling", y.shape)
-        for mlp in self.bottlenecks:
+        for i,mlp in enumerate(self.bottlenecks):
             y = mlp(y)
-            y = F.leaky_relu(y, LRELU_SLOPE)
+            if i != len(self.bottlenecks)-1:
+                y = F.leaky_relu(y, LRELU_SLOPE)
+
         #print("\t>FW PASS: y shape after mlp", y.shape)
+        #print("y after mlps: ", y[0])
         y = torch.sigmoid(y)
-        y  = (y >= self.threshold).float()
+        #print("y after sigmoid ", y)
+        #y  = (y >= self.threshold).float()
+        y.requires_grad_(True)
         return y

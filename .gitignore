@@ -163,3 +163,5 @@ cython_debug/
 
 # exclude everything
 generated_files/*
+LJSpeech-1.1/*
+cp_hifigan/*

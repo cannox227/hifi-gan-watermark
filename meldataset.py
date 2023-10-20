@@ -90,7 +90,7 @@ def get_dataset_filelist(a):
 class MelDataset(torch.utils.data.Dataset):
     def __init__(self, training_files, segment_size, n_fft, num_mels,
                  hop_size, win_size, sampling_rate,  fmin, fmax, split=True, shuffle=True, n_cache_reuse=1,
-                 device=None, fmax_loss=None, fine_tuning=False, base_mels_path=None):
+                 device=None, fmax_loss=None, fine_tuning=False, base_mels_path=None, pad=False):
         self.audio_files = training_files
         random.seed(1234)
         if shuffle:
@@ -111,6 +111,7 @@ class MelDataset(torch.utils.data.Dataset):
         self.device = device
         self.fine_tuning = fine_tuning
         self.base_mels_path = base_mels_path
+        self.pad = pad
 
     def __getitem__(self, index):
         filename = self.audio_files[index]
@@ -139,7 +140,7 @@ class MelDataset(torch.utils.data.Dataset):
                     audio = audio[:, audio_start:audio_start+self.segment_size]
                 else:
                     audio = torch.nn.functional.pad(audio, (0, self.segment_size - audio.size(1)), 'constant')
-
+        
             mel = mel_spectrogram(audio, self.n_fft, self.num_mels,
                                   self.sampling_rate, self.hop_size, self.win_size, self.fmin, self.fmax,
                                   center=False)

@@ -82,12 +82,16 @@ def get_mfcc_features_padded(audio_data : np.ndarray, n_mfcc=20, sr=22050):
     
     return mfcc
 
+def get_padded_audio_len(sample_rate: int):
+    # Return max audio length after padding 
+    return round(sample_rate * MAX_AUDIO_LEN_S)
+
 def get_audio_padded(file_path):
     audio_data,fs  = load_wav(file_path)
     #print("fs", fs)
     #print(type(audio_data), audio_data.dtype)
-    MAX_N_SAMPLES = fs * MAX_AUDIO_LEN_S
-    padding_size = int(MAX_N_SAMPLES - audio_data.shape[0])
+    audio_len = get_padded_audio_len(fs)
+    padding_size = int(audio_len - audio_data.shape[0])
     padding = np.zeros(padding_size, dtype=np.int16)
     audio_data = np.concatenate((audio_data, padding), axis=0, dtype=np.int16)
     return audio_data, fs
