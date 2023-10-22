@@ -33,7 +33,7 @@ If you add a new library or modify any library version you can re-export module 
     python3 inference.py --checkpoint_file LJ_FT_T2_V3/generator_v3
 
 ### Training
-    python3 train.py --config <config_file.json> n--training_epochs=50 --checkpoint_interval=820
+    python3 train.py --config <config_file.json> --training_epochs=50 --checkpoint_interval=820
 
 ### Experiments script
     python3 audio2waveform.py

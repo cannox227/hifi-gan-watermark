@@ -68,7 +68,7 @@ def inference(a):
             print(output_file)
 
             test_wav, sr = load_wav(output_file)
-            wav = torch.FloatTensor(wav).to(device)
+            wav = torch.FloatTensor(test_wav).to(device)
             print("Wav file after reading it with torchaudio: ", wav.shape)
             x = get_mel(wav.unsqueeze(0)) 
             print("Mel spectrogram shape: ", x.shape)
