@@ -44,17 +44,22 @@ def train(rank, a, h):
         cp_g = scan_checkpoint(a.checkpoint_path, 'g_')
         cp_do = scan_checkpoint(a.checkpoint_path, 'do_')
         # TODO: add checkpoint for wm_decoder
+        cp_wm = scan_checkpoint(a.checkpoint_path, 'wm_')
+
 
     steps = 0
-    if cp_g is None or cp_do is None:
+    if cp_g is None or cp_do is None or cp_wm is None:
         state_dict_do = None
+        state_dict_wm = None
         last_epoch = -1
     else:
         state_dict_g = load_checkpoint(cp_g, device)
         state_dict_do = load_checkpoint(cp_do, device)
+        state_dict_wm = load_checkpoint(cp_wm, device)
         generator.load_state_dict(state_dict_g['generator'])
         mpd.load_state_dict(state_dict_do['mpd'])
         msd.load_state_dict(state_dict_do['msd'])
+        wm_decoder.load_state_dict(state_dict_wm['wm'])
         steps = state_dict_do['steps'] + 1
         last_epoch = state_dict_do['epoch']
         #TODO: load wm decoder dict
@@ -74,6 +79,9 @@ def train(rank, a, h):
     if state_dict_do is not None:
         optim_g.load_state_dict(state_dict_do['optim_g'])
         optim_d.load_state_dict(state_dict_do['optim_d'])
+    
+    if state_dict_wm is not None:
+        optim_wm.load_state_dict(state_dict_wm['optim_wm'])
 
     #TODO: state dict wm
 
@@ -189,7 +197,7 @@ def train(rank, a, h):
             # loss_wm = loss_wm.item()
             # print("loss wm: ", loss_wm)
             
-            loss_wm = torch.mean(torch.abs(fp_hat-fp_true))
+            loss_wm = torch.nn.functional.binary_cross_entropy(fp_hat, fp_true)#torch.mean(torch.abs(fp_hat-fp_true))
             
             #print("loss wm require grad si no?", loss_wm.requires_grad)
             #print("FP HAT SHAPE ", fp_hat.shape, " FP TRUE SHAPE ", fp_true.shape)
@@ -233,11 +241,16 @@ def train(rank, a, h):
                                                          else msd).state_dict(),
                                      'optim_g': optim_g.state_dict(), 'optim_d': optim_d.state_dict(), 'steps': steps,
                                      'epoch': epoch})
+                    checkpoint_path = "{}/wm_{:08d}".format(a.checkpoint_path, steps)
+                    save_checkpoint(checkpoint_path, 
+                                    {'wm': (wm_decoder.module if h.num_gpus > 1 else wm_decoder).state_dict(),
+                                     'optim_wm': optim_wm.state_dict()})
 
                 # Tensorboard summary logging
                 if steps % a.summary_interval == 0:
                     sw.add_scalar("training/gen_loss_total", loss_gen_all, steps)
                     sw.add_scalar("training/mel_spec_error", mel_error, steps)
+                    sw.add_scalar("training/wm_error", loss_wm, steps)
 
                 # Validation
                 if steps % a.validation_interval == 0:  # and steps != 0:

@@ -96,13 +96,25 @@ def get_audio_padded(file_path):
     audio_data = np.concatenate((audio_data, padding), axis=0, dtype=np.int16)
     return audio_data, fs
 
-def save_mel_spectrogram(audio, sr, filepath):
+def compute_and_save_mel_spectrogram(audio, sr, filepath):
     audio = audio.astype(np.float16)
     # Create a spectrogram
     spectrogram = librosa.feature.melspectrogram(y=audio, sr=sr)
 
     # Convert to dB scale (log scale)
     spectrogram_db = librosa.power_to_db(spectrogram, ref=np.max)
+
+    # Plot the spectrogram
+    plt.figure(figsize=(10, 6))
+    plt.imshow(spectrogram_db, origin='lower')
+    plt.colorbar(format='%+2.0f dB')
+    plt.title('Spectrogram')
+    plt.savefig(filepath+".png")
+
+def save_mel_spectrogram(mel, filepath):
+    
+    # Convert to dB scale (log scale)
+    spectrogram_db = librosa.power_to_db(mel, ref=np.max)
 
     # Plot the spectrogram
     plt.figure(figsize=(10, 6))
@@ -119,3 +131,11 @@ def save_mfcc_plot(mfcc_vals, filepath):
     plt.title('MFCC')
     plt.savefig(filepath+".png")
 
+def get_mel_spectogram(audio, sr):
+    audio = audio.astype(np.float16)
+    # Create a spectrogram
+    spectrogram = librosa.feature.melspectrogram(y=audio, sr=sr)
+
+    # Convert to dB scale (log scale)
+    spectrogram_db = librosa.power_to_db(spectrogram, ref=np.max) 
+    return spectrogram_db
