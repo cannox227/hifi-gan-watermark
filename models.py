@@ -361,7 +361,7 @@ class BernoulliFingerprintEncoder(torch.nn.Module):
     def __init__(self, probability=0.5):
         super(BernoulliFingerprintEncoder, self).__init__()
         #self.bern_shape = (batch_size, 128)
-        self.fingerprint_size = 32
+        self.fingerprint_size = 4
         self.hidden_size = self.fingerprint_size
         self.output_size = 256
         # output size should match the film_channels parameter
@@ -419,17 +419,17 @@ class ConvFeatExtractor(torch.nn.Module):
         self.output_dim = 1024
         self.convs = nn.ModuleList([
             norm_f(Conv1d(1, 128, 15, 1, padding=7)),
-            norm_f(Conv1d(128, 1024, 41, 2, groups=4, padding=20)), 
-            # norm_f(Conv1d(128, 256, 41, 2, groups=16, padding=20)), 
-            # norm_f(Conv1d(256, 512, 41, 4, groups=16, padding=20)), 
-            # norm_f(Conv1d(512, 1024, 41, 4, groups=16, padding=20)),
-            # norm_f(Conv1d(1024, 1024, 41, 1, groups=16, padding=20)),
-            # norm_f(Conv1d(1024, self.output_dim, 5, 1, padding=2)),
+            norm_f(Conv1d(128, 128, 41, 2, groups=4, padding=20)), 
+            norm_f(Conv1d(128, 256, 41, 2, groups=16, padding=20)), 
+            norm_f(Conv1d(256, 512, 41, 4, groups=16, padding=20)), 
+            norm_f(Conv1d(512, 1024, 41, 4, groups=16, padding=20)),
+            norm_f(Conv1d(1024, 1024, 41, 1, groups=16, padding=20)),
+            norm_f(Conv1d(1024, self.output_dim, 5, 1, padding=2)),
         ])
         # If input [1, 1, 224768]
         # conv time out will be the third dimension divided by 
         # the stride of each conv
-        self.conv_time_out = time_channel / (1*2)#(1*2*2*4*4*1*1)
+        self.conv_time_out = time_channel / (1*2*2*4*4*1*1)
     def forward(self, x):
         for i, l in enumerate(self.convs):
             x = l(x)
@@ -438,7 +438,39 @@ class ConvFeatExtractor(torch.nn.Module):
             #print("x shape after all convs ",x.shape)         
         return x
 
+class BottleNeck(nn.Module):
+    def __init__(self, input_size = 8000, output_size = 32):
+        super(BottleNeck, self).__init__()
+        self.input_size = input_size
+        self.outpur_size = output_size #fingerprint size
+        self.dropout = nn.Dropout(p=0.25)
+        self.bottleneck = nn.ModuleList([
+            nn.Linear(in_features=input_size, out_features=input_size//2),
+            nn.Linear(in_features=input_size // 2, out_features=output_size)
+        ])
 
+    def forward(self, x):
+        x = torch.relu(self.bottleneck[0](x))
+        x = self.dropout(x)
+        x = torch.sigmoid(self.bottleneck[1](x)) 
+        return x
+
+class BottleNeckConv(nn.Module):
+    def __init__(self, input_size = 8000, output_size = 32):
+        super(BottleNeck, self).__init__()
+        self.input_size = input_size
+        self.outpur_size = output_size #fingerprint size
+        self.bottleneck = nn.ModuleList([
+            weight_norm(nn.Conv1d(in_channels=input_size, out_channels=input_size//2, kernel=3, stride=1)),
+            weight_norm(nn.Conv1d(in_channels=input_size//2, out_channels=input_size//4, kernel=3, stride=1)),
+            weight_norm(nn.Conv1d(in_channels=input_size//4, out_channels=output_size, kernel=3, stride=1))
+        ])
+
+    def forward(self, x):
+        x = torch.relu(self.bottleneck[0](x))
+        x = torch.sigmoid(self.bottleneck[1](x)) 
+        return x
+        
 class AttentiveDecoder(nn.Module):
     # Input dim = mcpp channels
     # Output dim = fingerprint size
@@ -500,7 +532,10 @@ class AttentiveDecoder(nn.Module):
 
         #print("\t>FW PASS: y shape after mlp", y.shape)
         #print("y after mlps: ", y[0])
-        y = torch.sigmoid(y)
+        
+        
+        #y = torch.sigmoid(y)
+        
         #print("y after sigmoid ", y)
         #y  = (y >= self.threshold).float()
         y.requires_grad_(True)
