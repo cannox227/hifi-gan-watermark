@@ -115,7 +115,7 @@ class Generator(torch.nn.Module):
         self.film_channels = h.film_channels
         if self.film_channels > 0:
             self.original_fingerprint = None
-            self.bernoulli = BernoulliFingerprintEncoder(probability=0.5)
+            self.bernoulli = BernoulliFingerprintEncoder(probability=0.5,fingerprint_size=h.fingerprint_size) #TODO: add inferprint size
         self.ups = nn.ModuleList()
 
         for i, (u, k) in enumerate(zip(h.upsample_rates, h.upsample_kernel_sizes)):
@@ -358,10 +358,10 @@ class FingerprintDecoder(torch.nn.Module):
         return x
     
 class BernoulliFingerprintEncoder(torch.nn.Module):
-    def __init__(self, probability=0.5):
+    def __init__(self, probability=0.5, fingerprint_size=8):
         super(BernoulliFingerprintEncoder, self).__init__()
         #self.bern_shape = (batch_size, 128)
-        self.fingerprint_size = 4
+        self.fingerprint_size = fingerprint_size
         self.hidden_size = self.fingerprint_size
         self.output_size = 256
         # output size should match the film_channels parameter
@@ -444,15 +444,22 @@ class BottleNeck(nn.Module):
         self.input_size = input_size
         self.outpur_size = output_size #fingerprint size
         self.dropout = nn.Dropout(p=0.25)
-        self.bottleneck = nn.ModuleList([
+        self.bottlenecks = nn.ModuleList([
             nn.Linear(in_features=input_size, out_features=input_size//2),
-            nn.Linear(in_features=input_size // 2, out_features=output_size)
+            nn.Linear(in_features=input_size // 2, out_features=input_size // 4),
+            nn.Linear(in_features=input_size // 4, out_features=input_size // 8),
+            nn.Linear(in_features=input_size // 8, out_features=input_size // 16),
+            nn.Linear(in_features=input_size // 16, out_features=input_size // 32),
+            nn.Linear(in_features=input_size // 32, out_features=input_size // 64),
+            nn.Linear(in_features=input_size // 64, out_features=output_size), 
         ])
 
     def forward(self, x):
-        x = torch.relu(self.bottleneck[0](x))
-        x = self.dropout(x)
-        x = torch.sigmoid(self.bottleneck[1](x)) 
+        for i, bn in enumerate(self.bottlenecks):
+            if i != len(self.bottlenecks)-1:
+                x = torch.relu(self.bottlenecks[i](x))
+                x = self.dropout(x)
+        x = torch.sigmoid(self.bottlenecks[-1](x)) 
         return x
 
 class BottleNeckConv(nn.Module):

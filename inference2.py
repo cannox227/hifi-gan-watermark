@@ -8,7 +8,7 @@ import torch
 from scipy.io.wavfile import write
 from env import AttrDict
 from meldataset import mel_spectrogram, MAX_WAV_VALUE, load_wav
-from models import Generator, AttentiveDecoder
+from models import Generator, AttentiveDecoder, BottleNeck
 from utils import get_audio_padded
 import numpy as np
 
@@ -42,6 +42,12 @@ def inference(a):
     state_dict_g = load_checkpoint(a.checkpoint_file, device)
     generator.load_state_dict(state_dict_g['generator'])
 
+    # Load decoder
+    decoder = BottleNeck(input_size=h.segment_size, output_size=4).to(device)
+    state_dict_w = load_checkpoint(a.decoder_checkpoint, device)
+    decoder.load_state_dict(state_dict_w['wm'])
+
+    loss = torch.nn.BCELoss()
     filelist = os.listdir(a.input_wavs_dir)
 
     os.makedirs(a.output_dir, exist_ok=True)
@@ -64,14 +70,19 @@ def inference(a):
             print("Generated audio shape: ", y_g_hat.shape)
 
             # Attentive decoder test
-            fingerprint_size = 128 
-            ad = AttentiveDecoder(input_dim=y_g_hat.shape[2], output_dim=fingerprint_size).to(device)
-            out = ad(y_g_hat)
-            print("Attentive decoder shape: ", out.shape)
-            print("Fingerprint tensor: ", out)
-            fing_arr = out.squeeze().cpu().numpy().astype('int16')
-            fing_conv = decimal_value = int(''.join(map(str, fing_arr.tolist())), 2)
-            print("Fingerprint converted: ", fing_conv)
+            original_fingerprint = generator.bernoulli.get_original_fingerprint()
+            retrieved_fingerprint = decoder(y_g_hat.squeeze(1))
+            print(f"Original fingerprint: {original_fingerprint}\nRetrieved fingerprint {retrieved_fingerprint}")
+            fing_loss = loss(retrieved_fingerprint, original_fingerprint)
+            print(f"Fingerprint loss: {fing_loss}\n")
+            # fingerprint_size = 128 
+            # ad = AttentiveDecoder(input_dim=y_g_hat.shape[2], output_dim=fingerprint_size).to(device)
+            # out = ad(y_g_hat)
+            # print("Attentive decoder shape: ", out.shape)
+            # print("Fingerprint tensor: ", out)
+            # fing_arr = out.squeeze().cpu().numpy().astype('int16')
+            # fing_conv = decimal_value = int(''.join(map(str, fing_arr.tolist())), 2)
+            # print("Fingerprint converted: ", fing_conv)
 
             # Convert generated audio to wav and write on disk
             audio = y_g_hat.squeeze()
@@ -96,6 +107,8 @@ def main():
     parser.add_argument('--input_wavs_dir', default='test_files')
     parser.add_argument('--output_dir', default='generated_files')
     parser.add_argument('--checkpoint_file', required=True)
+    parser.add_argument('--decoder_checkpoint', required=True)
+
     a = parser.parse_args()
 
     config_file = os.path.join(os.path.split(a.checkpoint_file)[0], 'config.json')

@@ -1,10 +1,10 @@
 from models import *
-from models import Generator
+from models import Generator, BottleNeck
 import torch
 from utils import *
 import json
 from env import AttrDict
-from torchsummary import summary
+from torch.utils.tensorboard import SummaryWriter
 
 # def get_generator_from_config(config_file):
 #     with open(config_file, "r") as config_file:
@@ -117,21 +117,6 @@ class EncoderDecoder(nn.Module):
         #print("Final output ", x)
         return x
 
-class BottleNeck(nn.Module):
-    def __init__(self, input_size = 8000, output_size = 32):
-        super(BottleNeck, self).__init__()
-        self.input_size = input_size
-        self.outpur_size = output_size #fingerprint size
-        self.bottleneck = nn.ModuleList([
-            nn.Linear(in_features=input_size, out_features=input_size//2),
-            nn.Linear(in_features=input_size // 2, out_features=output_size)
-        ])
-
-    def forward(self, x):
-        x = torch.relu(self.bottleneck[0](x))
-        x = torch.sigmoid(self.bottleneck[1](x)) 
-        return x
-
 def main():
 #     batch_size = 10
 #     channels = 512
@@ -191,11 +176,9 @@ def main():
     loss_f = nn.BCELoss()
     sigmoid = nn.Sigmoid()
     encdec.train()
+    bottleneck.train()
+    writer = SummaryWriter('experiments/logs')
     for epoch in range(epochs):
-        # encoder.train()
-        # decoder.train()
-        
-        
         fingerprint = torch.bernoulli(torch.full((batch_size, fingerprint_size), fill_value=0.5)).to(device)#.expand(batch_size, fingerprint_size).to(device)
         input_tensor = torch.randint(low=-32768, high=32767, size=(batch_size, channels, time)).float().to(device)  / MAX_WAV_VALUE
         # x_hat = encoder(input_tensor, fingerprint)
@@ -218,9 +201,11 @@ def main():
         optim_encdec.step()
         optim_bottleneck.step()
 
+
         if (epoch + 1) % 100 == 0:
             #print(f"Fingerprint hat: {fing_hat}")
             print(f'Epoch [{epoch+1}/{epochs}], Loss: {loss.item():.4f}') 
-
+            writer.add_scalar('training/decoder_error', loss, epoch)
+    writer.close()
 if __name__ == '__main__':   
    main()
