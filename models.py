@@ -445,37 +445,69 @@ class BottleNeck(nn.Module):
         self.outpur_size = output_size #fingerprint size
         self.dropout = nn.Dropout(p=0.25)
         self.bottlenecks = nn.ModuleList([
-            nn.Linear(in_features=input_size, out_features=input_size//2),
-            nn.Linear(in_features=input_size // 2, out_features=input_size // 4),
-            nn.Linear(in_features=input_size // 4, out_features=input_size // 8),
-            nn.Linear(in_features=input_size // 8, out_features=input_size // 16),
-            nn.Linear(in_features=input_size // 16, out_features=input_size // 32),
-            nn.Linear(in_features=input_size // 32, out_features=input_size // 64),
-            nn.Linear(in_features=input_size // 64, out_features=output_size), 
+            nn.Linear(in_features=input_size, out_features=input_size//4),
+            nn.Linear(in_features=input_size // 4, out_features=input_size // 16),
+            nn.Linear(in_features=input_size // 16, out_features=input_size // 64),
+            nn.Linear(in_features=input_size // 64, out_features=output_size)
         ])
 
     def forward(self, x):
         for i, bn in enumerate(self.bottlenecks):
             if i != len(self.bottlenecks)-1:
-                x = torch.relu(self.bottlenecks[i](x))
+                x = torch.relu(bn(x))
                 x = self.dropout(x)
         x = torch.sigmoid(self.bottlenecks[-1](x)) 
         return x
 
 class BottleNeckConv(nn.Module):
+
+    
     def __init__(self, input_size = 8000, output_size = 32):
-        super(BottleNeck, self).__init__()
+        super(BottleNeckConv, self).__init__()
         self.input_size = input_size
         self.outpur_size = output_size #fingerprint size
-        self.bottleneck = nn.ModuleList([
-            weight_norm(nn.Conv1d(in_channels=input_size, out_channels=input_size//2, kernel=3, stride=1)),
-            weight_norm(nn.Conv1d(in_channels=input_size//2, out_channels=input_size//4, kernel=3, stride=1)),
-            weight_norm(nn.Conv1d(in_channels=input_size//4, out_channels=output_size, kernel=3, stride=1))
+        
+        kernel_size = 7
+        stride = 3
+        dilation = 2
+        self.convs = nn.ModuleList([
+            weight_norm(nn.Conv1d(in_channels=1, out_channels=16, kernel_size=kernel_size, stride=stride, dilation=dilation)),
+            weight_norm(nn.Conv1d(in_channels=16, out_channels=64, kernel_size=kernel_size, stride=stride , dilation=dilation)),
+            weight_norm(nn.Conv1d(in_channels=64, out_channels=128, kernel_size=kernel_size, stride=stride, dilation=dilation))
         ])
 
+        def get_len_after_one_conv(l: int, k: int, s:int, d:int):
+            return int(((l - d*(k-1) - 1)/s)+1)
+        
+        self.conv_time = input_size
+        #print(input_size, type(input_size))
+        for i in range(len(self.convs)):
+            self.conv_time = get_len_after_one_conv(l=self.conv_time, k=kernel_size,s=stride, d=dilation)
+            
+        
+        self.conv_out_time = self.conv_time
+
+        self.bottlenecks = nn.ModuleList([
+            nn.Linear(in_features=128*self.conv_out_time, out_features=64),
+            nn.Linear(in_features=64, out_features=32),
+            nn.Linear(in_features=32, out_features=output_size)
+        ])
+    
+    # Pooling a caso
+    
+
     def forward(self, x):
-        x = torch.relu(self.bottleneck[0](x))
-        x = torch.sigmoid(self.bottleneck[1](x)) 
+        #print(f"x shape before conv {x.shape}")
+        for i, conv in enumerate(self.convs):
+            x = torch.relu(conv(x))
+            #print(f"x shape after conv {x.shape}") 
+        #print(f"conv out time: {self.conv_out_time}")
+        x = torch.flatten(x, 1, -1)
+        #print(f"x shape after flatten {x.shape}")
+        for i, bn in enumerate(self.bottlenecks):
+            if i != len(self.bottlenecks)-1:
+                x = torch.relu(bn(x))
+        x = torch.sigmoid(self.bottlenecks[-1](x)) 
         return x
         
 class AttentiveDecoder(nn.Module):

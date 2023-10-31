@@ -14,7 +14,8 @@ from torch.distributed import init_process_group
 from torch.nn.parallel import DistributedDataParallel
 from env import AttrDict, build_env
 from meldataset import MelDataset, mel_spectrogram, get_dataset_filelist
-from models import Generator, MultiPeriodDiscriminator, MultiScaleDiscriminator, AttentiveDecoder, BottleNeck, \
+from models import Generator, MultiPeriodDiscriminator, MultiScaleDiscriminator, \
+    BottleNeckConv, AttentiveDecoder, BottleNeck, \
 feature_loss, generator_loss,\
     discriminator_loss
 from utils import plot_spectrogram, scan_checkpoint, load_checkpoint, save_checkpoint
@@ -34,7 +35,8 @@ def train(rank, a, h):
     mpd = MultiPeriodDiscriminator().to(device)
     msd = MultiScaleDiscriminator().to(device)
     wm_decoder = BottleNeck(input_size=h.segment_size, output_size=generator.bernoulli.fingerprint_size).to(device)
-    #AttentiveDecoder(input_dim=h.segment_size,output_dim=generator.bernoulli.fingerprint_size).to(device)   
+    #BottleNeckConv(input_size=h.segment_size, output_size=generator.bernoulli.fingerprint_size).to(device)
+    # AttentiveDecoder(input_dim=h.segment_size,output_dim=generator.bernoulli.fingerprint_size).to(device)   
     decoder_loss = torch.nn.BCELoss()
 
     if rank == 0:
@@ -183,6 +185,8 @@ def train(rank, a, h):
             optim_wm.zero_grad()
             #print("y g hat: ",y_g_hat[0])
             fp_hat = wm_decoder(y_g_hat.squeeze(1))
+            #wm_decoder(y_g_hat) 
+            #
             #print(fp_hat[0])
             #diff = torch.abs(fp_hat - fp_old)
             #print(torch.sum(diff))
@@ -200,7 +204,7 @@ def train(rank, a, h):
             # print("loss wm: ", loss_wm)
             
             #loss_wm = torch.nn.functional.binary_cross_entropy_with_logits(fp_hat, fp_true)#torch.mean(torch.abs(fp_hat-fp_true))
-            loss_wm = decoder_loss(fp_hat, fp_true) * 5
+            loss_wm = decoder_loss(fp_hat, fp_true)
 
             #print("loss wm require grad si no?", loss_wm.requires_grad)
             #print("FP HAT SHAPE ", fp_hat.shape, " FP TRUE SHAPE ", fp_true.shape)

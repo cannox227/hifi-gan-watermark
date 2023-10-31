@@ -1,5 +1,5 @@
 from models import *
-from models import Generator, BottleNeck
+from models import Generator, BottleNeck, BottleNeckConv
 import torch
 from utils import *
 import json
@@ -150,7 +150,7 @@ def main():
 
 
     ##########
-    fingerprint_size = 32
+    fingerprint_size = 16 
     embed_size = 512
     batch_size = 16 
     channels = 1
@@ -166,7 +166,8 @@ def main():
     # encoder = BasicEncoder(input_size=time, fingerprint_size=fingerprint_size, output_size=output_size).to(device)
     # decoder = BasicDecoder(input_size=output_size, output_size=fingerprint_size).to(device)
     encdec = EncoderDecoder(input_size=time, fingerprint_size=fingerprint_size, embed_size=embed_size).to(device)
-    bottleneck = BottleNeck(input_size=time, output_size=fingerprint_size).to(device)
+    #bottleneck = BottleNeck(input_size=time, output_size=fingerprint_size).to(device)
+    bottleneck = BottleNeckConv(input_size=time, output_size=fingerprint_size).to(device)
     # out = encoder(input_tensor, fingerprint)
     # print(out.shape)
     # print(out)
@@ -183,7 +184,9 @@ def main():
         input_tensor = torch.randint(low=-32768, high=32767, size=(batch_size, channels, time)).float().to(device)  / MAX_WAV_VALUE
         # x_hat = encoder(input_tensor, fingerprint)
         # fing_hat = decoder(x_hat)
-        fing_hat = bottleneck(encdec(input_tensor, fingerprint))
+        encoded_audio = encdec(input_tensor, fingerprint).unsqueeze(1)
+        #print(encoded_audio.shape)
+        fing_hat = bottleneck(encoded_audio)
         #print(f"Fing hat shape ", fing_hat.shape)
         #print(f"FINGERPRINT AFTER DECODER: ", fing_hat)
         # print(f"Orignal fingerpirnt: ", fingerprint) 
