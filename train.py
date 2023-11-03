@@ -34,8 +34,8 @@ def train(rank, a, h):
     generator = Generator(h).to(device)
     mpd = MultiPeriodDiscriminator().to(device)
     msd = MultiScaleDiscriminator().to(device)
-    wm_decoder = BottleNeck(input_size=h.segment_size, output_size=generator.bernoulli.fingerprint_size).to(device)
-    #BottleNeckConv(input_size=h.segment_size, output_size=generator.bernoulli.fingerprint_size).to(device)
+    wm_decoder =  BottleNeckConv(input_size=h.segment_size, output_size=generator.bernoulli.fingerprint_size).to(device)
+    #BottleNeck(input_size=h.segment_size, output_size=generator.bernoulli.fingerprint_size).to(device)
     # AttentiveDecoder(input_dim=h.segment_size,output_dim=generator.bernoulli.fingerprint_size).to(device)   
     decoder_loss = torch.nn.BCELoss()
 
@@ -184,7 +184,7 @@ def train(rank, a, h):
             # Watermark
             optim_wm.zero_grad()
             #print("y g hat: ",y_g_hat[0])
-            fp_hat = wm_decoder(y_g_hat.squeeze(1))
+            fp_hat = wm_decoder(y_g_hat)
             #wm_decoder(y_g_hat) 
             #
             #print(fp_hat[0])
@@ -192,7 +192,7 @@ def train(rank, a, h):
             #print(torch.sum(diff))
             fp_old = fp_hat
             fp_true = generator.bernoulli.get_original_fingerprint()
-
+            #print(fp_true)
             #print("fp_hat", fp_hat)
             #print("grads si no? ", fp_hat.requires_grad, fp_true.requires_grad)
             # loss_wm = torch.zeros(1,).to(device)

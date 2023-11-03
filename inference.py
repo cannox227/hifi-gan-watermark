@@ -39,7 +39,7 @@ def inference(a):
     generator = Generator(h).to(device)
 
     state_dict_g = load_checkpoint(a.checkpoint_file, device)
-    generator.load_state_dict(state_dict_g['generator'])
+    generator.load_state_dict(state_dict_g['generator']) #strict=False to ignore missing keys
 
     filelist = os.listdir(a.input_wavs_dir)
 

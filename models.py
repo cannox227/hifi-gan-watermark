@@ -466,48 +466,44 @@ class BottleNeckConv(nn.Module):
         super(BottleNeckConv, self).__init__()
         self.input_size = input_size
         self.outpur_size = output_size #fingerprint size
-        
-        kernel_size = 7
-        stride = 3
-        dilation = 2
-        self.convs = nn.ModuleList([
-            weight_norm(nn.Conv1d(in_channels=1, out_channels=16, kernel_size=kernel_size, stride=stride, dilation=dilation)),
-            weight_norm(nn.Conv1d(in_channels=16, out_channels=64, kernel_size=kernel_size, stride=stride , dilation=dilation)),
-            weight_norm(nn.Conv1d(in_channels=64, out_channels=128, kernel_size=kernel_size, stride=stride, dilation=dilation))
-        ])
 
-        def get_len_after_one_conv(l: int, k: int, s:int, d:int):
-            return int(((l - d*(k-1) - 1)/s)+1)
-        
-        self.conv_time = input_size
-        #print(input_size, type(input_size))
-        for i in range(len(self.convs)):
-            self.conv_time = get_len_after_one_conv(l=self.conv_time, k=kernel_size,s=stride, d=dilation)
-            
-        
-        self.conv_out_time = self.conv_time
+        #kernerl, s, d
+        k_s = 7
+        d = 1
+        channels = [2, 2, 32, 32, 64, 64, 256, 256]
+        kernels = [3, 3, 7, 7, 13, 13, 13, 13]
+        self.convs = nn.ModuleList()
+        for i, (c, k) in enumerate(zip(channels, kernels)):
+            if i == 0:
+                self.convs.append(weight_norm(nn.Conv1d(in_channels=1, out_channels=c, kernel_size=k, dilation=d, padding='same')))
+            else:
+                self.convs.append(weight_norm(nn.Conv1d(in_channels=channels[i-1], out_channels=c, kernel_size=k, dilation=d, padding='same'))) 
 
-        self.bottlenecks = nn.ModuleList([
-            nn.Linear(in_features=128*self.conv_out_time, out_features=64),
-            nn.Linear(in_features=64, out_features=32),
-            nn.Linear(in_features=32, out_features=output_size)
-        ])
-    
-    # Pooling a caso
+        # self.convs = nn.ModuleList([
+        #     weight_norm(nn.Conv1d(in_channels=1, out_channels=16, kernel_size=k_s, dilation=d, padding='same')),
+        #     weight_norm(nn.Conv1d(in_channels=16, out_channels=64, kernel_size=k_s, dilation=d, padding='same')),
+        #     weight_norm(nn.Conv1d(in_channels=64, out_channels=128, kernel_size=k_s, dilation=d, padding='same'))
+        # ])
+
+        self.relu = nn.LeakyReLU(negative_slope=0.01)
+        self.avg_pooling = nn.AdaptiveAvgPool1d(output_size=1)
+        self.last_conv = weight_norm(nn.Conv1d(in_channels=channels[-1], out_channels=output_size, kernel_size=5, padding='same'))
     
 
     def forward(self, x):
-        #print(f"x shape before conv {x.shape}")
+        # print(f"x before conv {x.shape}")
+        # print(f"elements before conv\n{x}")
         for i, conv in enumerate(self.convs):
-            x = torch.relu(conv(x))
-            #print(f"x shape after conv {x.shape}") 
-        #print(f"conv out time: {self.conv_out_time}")
-        x = torch.flatten(x, 1, -1)
-        #print(f"x shape after flatten {x.shape}")
-        for i, bn in enumerate(self.bottlenecks):
-            if i != len(self.bottlenecks)-1:
-                x = torch.relu(bn(x))
-        x = torch.sigmoid(self.bottlenecks[-1](x)) 
+            x = self.relu(conv(x))
+            # print(f"elements after a conv\n{x}")
+            # print(f"x after conv {x.shape}")
+
+        x = self.relu(self.avg_pooling(x))
+        # print(f"elements after a avg pool \n{x}")
+        x = torch.sigmoid(self.last_conv(x)) 
+        # print(f"elements after sigmoid \n{x}")
+        x = x.squeeze(2)
+        #print(f"Decoded fingerpirnt {x}")
         return x
         
 class AttentiveDecoder(nn.Module):

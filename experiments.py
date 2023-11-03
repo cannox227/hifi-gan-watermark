@@ -150,11 +150,11 @@ def main():
 
 
     ##########
-    fingerprint_size = 16 
+    fingerprint_size = 2 
     embed_size = 512
     batch_size = 16 
     channels = 1
-    time = 8000
+    time = 100
     epochs = 100000
     MAX_WAV_VALUE = 32768.0
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -168,6 +168,7 @@ def main():
     encdec = EncoderDecoder(input_size=time, fingerprint_size=fingerprint_size, embed_size=embed_size).to(device)
     #bottleneck = BottleNeck(input_size=time, output_size=fingerprint_size).to(device)
     bottleneck = BottleNeckConv(input_size=time, output_size=fingerprint_size).to(device)
+    print("Bottleneck structure\n",bottleneck)
     # out = encoder(input_tensor, fingerprint)
     # print(out.shape)
     # print(out)
@@ -179,14 +180,30 @@ def main():
     encdec.train()
     bottleneck.train()
     writer = SummaryWriter('experiments/logs')
+
+    tensors = []
+    for i in range(batch_size):
+        tens = (torch.full(size=(channels, time), fill_value=i).to(device).float())
+        tensors.append(tens)
+    
+    input_t = torch.stack(tensors).to(device)
+
+
+    print("stacked tensor: ",input_t)
     for epoch in range(epochs):
+
         fingerprint = torch.bernoulli(torch.full((batch_size, fingerprint_size), fill_value=0.5)).to(device)#.expand(batch_size, fingerprint_size).to(device)
-        input_tensor = torch.randint(low=-32768, high=32767, size=(batch_size, channels, time)).float().to(device)  / MAX_WAV_VALUE
+        # input_tensor = torch.randint(low=-32768, high=32767, size=(batch_size, channels, time)).float().to(device)  / MAX_WAV_VALUE
+       
         # x_hat = encoder(input_tensor, fingerprint)
         # fing_hat = decoder(x_hat)
+
         encoded_audio = encdec(input_tensor, fingerprint).unsqueeze(1)
+        #encoded_audio = input_t
         #print(encoded_audio.shape)
         fing_hat = bottleneck(encoded_audio)
+        #print(fing_hat)
+        #print(fing_hat[0], fing_hat[1])
         #print(f"Fing hat shape ", fing_hat.shape)
         #print(f"FINGERPRINT AFTER DECODER: ", fing_hat)
         # print(f"Orignal fingerpirnt: ", fingerprint) 
@@ -195,7 +212,7 @@ def main():
         loss = loss_f(fing_hat, fingerprint)
         #loss2 = loss_f2(fing_hat, fingerprint)
         #torch.mean(torch.binary_cross_entropy_with_logits(input=fing_hat, target=fingerprint))
-        #print(loss)
+        print(loss)
         #print(loss2)
         optim_encdec.zero_grad()
         optim_bottleneck.zero_grad()
