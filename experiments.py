@@ -150,11 +150,11 @@ def main():
 
 
     ##########
-    fingerprint_size = 2 
+    fingerprint_size = 2
     embed_size = 512
     batch_size = 16 
     channels = 1
-    time = 100
+    time = 8000
     epochs = 100000
     MAX_WAV_VALUE = 32768.0
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -181,27 +181,25 @@ def main():
     bottleneck.train()
     writer = SummaryWriter('experiments/logs')
 
-    tensors = []
-    for i in range(batch_size):
-        tens = (torch.full(size=(channels, time), fill_value=i).to(device).float())
-        tensors.append(tens)
-    
-    input_t = torch.stack(tensors).to(device)
-
-
-    print("stacked tensor: ",input_t)
     for epoch in range(epochs):
 
-        fingerprint = torch.bernoulli(torch.full((batch_size, fingerprint_size), fill_value=0.5)).to(device)#.expand(batch_size, fingerprint_size).to(device)
-        # input_tensor = torch.randint(low=-32768, high=32767, size=(batch_size, channels, time)).float().to(device)  / MAX_WAV_VALUE
-       
+        fingerprint = torch.bernoulli(torch.full((1, fingerprint_size), fill_value=0.5)).to(device)#.expand(batch_size, fingerprint_size).to(device)
+        
+        input_tensor = torch.zeros(size=(batch_size, channels, time)).float().to(device)
+        #torch.randint(low=-32768, high=32767, size=(batch_size, channels, time)).float().to(device)  / MAX_WAV_VALUE
+        fingerprint_exp = fingerprint.unsqueeze(-1).expand(batch_size, -1, input_tensor.shape[-1])
+        fingerprint = fingerprint.expand(batch_size, -1)
+        
+        #print(f"FINGERPRINT SIZE: {fingerprint.shape}\nInput tensor shape {input_tensor.shape}")
         # x_hat = encoder(input_tensor, fingerprint)
         # fing_hat = decoder(x_hat)
 
-        encoded_audio = encdec(input_tensor, fingerprint).unsqueeze(1)
+        # encoded_audio = encdec(input_tensor, fingerprint).unsqueeze(1)
+        encoded_audio = torch.cat((input_tensor, fingerprint_exp), dim=1)
         #encoded_audio = input_t
         #print(encoded_audio.shape)
         fing_hat = bottleneck(encoded_audio)
+        #print(f"FINGEPRINT SIZE HAT : {fing_hat.shape}")
         #print(fing_hat)
         #print(fing_hat[0], fing_hat[1])
         #print(f"Fing hat shape ", fing_hat.shape)
@@ -216,7 +214,6 @@ def main():
         #print(loss2)
         optim_encdec.zero_grad()
         optim_bottleneck.zero_grad()
-        loss.backward()
         #loss2.backward()
         optim_encdec.step()
         optim_bottleneck.step()
