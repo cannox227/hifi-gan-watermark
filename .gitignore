@@ -165,3 +165,7 @@ cython_debug/
 generated_files/*
 LJSpeech-1.1/*
 cp_hifigan/*
+cp_hifigan_v2/*
+film_generated_files/*
+**/*.pt
+**/*wav

@@ -136,18 +136,13 @@ class Generator(torch.nn.Module):
     def forward(self, x):
         if self.film_channels > 0:
             self.fingerprint = self.bernoulli(x)
-            # print("Bernoulli encodedn shape", self.fingerprint.shape)
             self.original_fingerprint = self.bernoulli.get_original_fingerprint()
         else:
             self.fingerprint = None
-        # print("original fingerprint shape", self.original_fingerprint.shape)
-        # print("X shape before conv pre",x.shape)
         x = self.conv_pre(x)
-        # print("X shape after conv pre",x.shape)
         for i in range(self.num_upsamples):
             x = F.leaky_relu(x, LRELU_SLOPE)
             x = self.ups[i](x) # ky[l] * 1 ConvTranspose
-            # print("x after upsample",x.shape)
             xs = None
             for j in range(self.num_kernels):
                 if xs is None:
@@ -155,7 +150,6 @@ class Generator(torch.nn.Module):
                 else:
                     xs += self.resblocks[i*self.num_kernels+j](x, self.fingerprint)
             x = xs / self.num_kernels
-        # print("x shape after resblocks",x.shape)
         x = F.leaky_relu(x)
         x = self.conv_post(x)
         x = torch.tanh(x)
@@ -479,33 +473,19 @@ class BottleNeckConv(nn.Module):
             else:
                 self.convs.append(weight_norm(nn.Conv1d(in_channels=channels[i-1], out_channels=c, kernel_size=k, dilation=d, padding='same'))) 
 
-        # self.convs = nn.ModuleList([
-        #     weight_norm(nn.Conv1d(in_channels=1, out_channels=16, kernel_size=k_s, dilation=d, padding='same')),
-        #     weight_norm(nn.Conv1d(in_channels=16, out_channels=64, kernel_size=k_s, dilation=d, padding='sme')),
-        #     weight_norm(nn.Conv1d(in_channels=64, out_channels=128, kernel_size=k_s, dilation=d, padding='same'))
-        # ])
 
         self.relu = nn.LeakyReLU(negative_slope=0.01)
-        #self.avg_pooling = #nn.AdaptiveAvgPool1d(output_size=1)
         self.last_conv = weight_norm(nn.Conv1d(in_channels=channels[-1], out_channels=output_size, kernel_size=1, padding='same'))
     
 
     def forward(self, x):
-        # print(f"x before conv {x.shape}")
-        #print(f"elements before conv\n{x}")
         for i, conv in enumerate(self.convs):
             x = self.relu(conv(x))
-            #print(f"elements after a conv\n{x}")
-            # print(f"x after conv {x.shape}")
 
         x = torch.mean(x, dim=-1, keepdim=True) 
         
-        #self.relu(self.avg_pooling(x))
-        #print(f"elements after a avg pool \n{x}")
         x = torch.sigmoid(self.last_conv(x)) 
-        # print(f"elements after sigmoid \n{x}")
         x = x.squeeze(2)
-        #print(f"Decoded fingerprint {x}")
         return x
         
 class AttentiveDecoder(nn.Module):
@@ -549,31 +529,198 @@ class AttentiveDecoder(nn.Module):
     def forward(self, y):#, y_hat):
         # R = real
         # G = generated
-        #print("\t>FW PASS: y shape before feature extractor", y.shape)
-        #print("Y inizio fw: ", y[0])
         y = self.feature_extractors(y)
-        #print("Y dopo feat extr: ", y[0]) 
-        #print("\t>FW PASS: y shape after feature extractor", y.shape)
         # Apply self attention
         y_att_weights = self.attention(y)
-        #print("Att weights ", y_att_weights[0])
-        #print("\t>FW PASS: att weigh dim: ", y_att_weights.shape)
         # Apply stat pooling
         y = self.stat_attn_pool(y, y_att_weights)
-        #print("Y dopo stat pooling ", y[0])
-        #print("\t>FW PASS: y shape after stat pooling", y.shape)
         for i,mlp in enumerate(self.bottlenecks):
             y = mlp(y)
             if i != len(self.bottlenecks)-1:
                 y = F.leaky_relu(y, LRELU_SLOPE)
 
-        #print("\t>FW PASS: y shape after mlp", y.shape)
-        #print("y after mlps: ", y[0])
-        
-        
-        #y = torch.sigmoid(y)
-        
-        #print("y after sigmoid ", y)
-        #y  = (y >= self.threshold).float()
         y.requires_grad_(True)
         return y
+    
+class ConvDecoder(nn.Module):
+    def __init__(self, input_size, output_size):
+        super(ConvDecoder, self).__init__()
+        self.input_size = input_size
+        
+        self.proj = weight_norm(nn.ConvTranspose1d(in_channels=1, out_channels=input_size, kernel_size=1))#, padding='same'))
+        self.convs = nn.ModuleList([
+        # weight_norm(nn.Conv1d(input_size, input_size//4, kernel_size=3, stride=1, dilation=1, padding='same')),
+        weight_norm(nn.Conv1d(input_size, input_size//8, kernel_size=3, stride=1, dilation=2, padding=get_padding(3,2))),
+        weight_norm(nn.Conv1d(input_size//8, input_size//8, kernel_size=5, stride=1, dilation=1, padding='same')),
+        weight_norm(nn.Conv1d(input_size//8, input_size//16, kernel_size=5, stride=1, dilation=4, padding=get_padding(5,4))),
+        # weight_norm(nn.Conv1d(input_size//16, input_size//16, kernel_size=5, stride=1, dilation=1, padding='same')),
+        weight_norm(nn.Conv1d(input_size//16, input_size//32, kernel_size=5, stride=1, dilation=8, padding=get_padding(5,8))),
+        # weight_norm(nn.Conv1d(input_size//32, input_size//16, kernel_size=3, stride=1, padding='same')),
+        # weight_norm(nn.Conv1d(input_size//16, input_size//32, kernel_size=3, stride=1, padding='same')),
+        # weight_norm(nn.Conv1d(input_size//16, input_size//128, kernel_size=3, stride=1, padding='same')),
+        # weight_norm(nn.Conv1d(input_size//32, input_size//32, kernel_size=5, stride=1, padding='same')),
+        weight_norm(nn.Conv1d(input_size//32, input_size//64, kernel_size=3, stride=1, dilation=16, padding=get_padding(3,16))),
+        # weight_norm(nn.Conv1d(input_size//64, input_size//64, kernel_size=3, stride=1, padding='same')),
+        weight_norm(nn.Conv1d(input_size//64, output_size, kernel_size=3, stride=1, padding='same'))
+        ])
+        self.leakyRELU = nn.LeakyReLU(0.01)
+        self.avgPool = nn.AdaptiveAvgPool1d(output_size=16)
+
+    def forward(self, x):
+        x = self.proj(x)
+        for i, c in enumerate(self.convs):
+            if i != len(self.convs)-1:
+                x = self.leakyRELU(c(x))
+            else:
+                x = c(x)
+        x = torch.mean(x, dim=-1).squeeze(-1)
+        return x
+
+
+
+
+class UNet(nn.Module):
+    def __init__(self, n_class, fing_size=3):
+        super().__init__()
+        
+        # Encoder
+        # In the encoder, convolutional layers with the Conv2d function are used to extract features from the input image. 
+        # Each block in the encoder consists of two convolutional layers followed by a max-pooling layer, with the exception of the last block which does not include a max-pooling layer.
+        # -------
+        # input: 572x572x3
+
+        dims = [1, 64, 128, 256, 512, 1024]
+        self.e11 = nn.Conv1d(dims[0], dims[1], kernel_size=3, padding=1) # output: 570x570x64
+        self.conv_e11 = nn.Conv1d(fing_size, dims[1]*2, kernel_size=3, padding=1) 
+        self.e12 = nn.Conv1d(dims[1], dims[1], kernel_size=3, padding=1) # output: 568x568x64
+        self.conv_e12 = nn.Conv1d(fing_size, dims[1]*2, kernel_size=3, padding=1) 
+        self.pool1 = nn.MaxPool1d(kernel_size=2, stride=2) # output: 284x284x64
+
+        # input: 284x284x64
+        self.e21 = nn.Conv1d(dims[1], dims[2], kernel_size=3, padding=1) # output: 282x282x128
+        self.conv_e21 = nn.Conv1d(fing_size, dims[2]*2, kernel_size=3, padding=1) 
+        self.e22 = nn.Conv1d(dims[2], dims[2], kernel_size=3, padding=1) # output: 280x280x128
+        self.conv_e22 = nn.Conv1d(fing_size, dims[2]*2, kernel_size=3, padding=1) 
+        self.pool2 = nn.MaxPool1d(kernel_size=2, stride=2) # output: 140x140x128
+
+        # input: 140x140x128
+        self.e31 = nn.Conv1d(dims[2], dims[3], kernel_size=3, padding=1) # output: 138x138x256
+        self.conv_e31 = nn.Conv1d(fing_size, dims[3]*2, kernel_size=3, padding=1) 
+        self.e32 = nn.Conv1d(dims[3], dims[3], kernel_size=3, padding=1) # output: 136x136x256
+        self.conv_e32 = nn.Conv1d(fing_size, dims[3]*2, kernel_size=3, padding=1) 
+        self.pool3 = nn.MaxPool1d(kernel_size=2, stride=2) # output: 68x68x256
+
+        # input: 68x68x256
+        self.e41 = nn.Conv1d(dims[3], dims[4], kernel_size=3, padding=1) # output: 66x66x512
+        self.conv_e41 = nn.Conv1d(fing_size, dims[4]*2, kernel_size=3, padding=1) 
+        self.e42 = nn.Conv1d(dims[4], dims[4], kernel_size=3, padding=1) # output: 64x64x512
+        self.conv_e42 = nn.Conv1d(fing_size, dims[4]*2, kernel_size=3, padding=1) 
+        self.pool4 = nn.MaxPool1d(kernel_size=2, stride=2) # output: 32x32x512
+
+        # input: 32x32x512
+        self.e51 = nn.Conv1d(dims[4], dims[5], kernel_size=3, padding=1) # output: 30x30x1024
+        self.conv_e51 = nn.Conv1d(fing_size, dims[5]*2, kernel_size=3, padding=1) 
+        self.e52 = nn.Conv1d( dims[5],  dims[5], kernel_size=3, padding=1) # output: 28x28x1024
+        self.conv_e52 = nn.Conv1d(fing_size, dims[5]*2, kernel_size=3, padding=1) 
+
+
+        # Decoder
+        self.upconv1 = nn.ConvTranspose1d( dims[5],  dims[4], kernel_size=2, stride=2)
+        self.d11 = nn.Conv1d( dims[5],dims[4], kernel_size=3, padding=1)
+        self.conv_d11 = nn.Conv1d( fing_size,  dims[4]*2, kernel_size=3, padding=1) # output: 28x28x1024
+        self.d12 = nn.Conv1d(dims[4], dims[4], kernel_size=3, padding=1)
+        self.conv_d12 = nn.Conv1d(fing_size,  dims[4]*2, kernel_size=3, padding=1) # output: 28x28x1024
+
+        self.upconv2 = nn.ConvTranspose1d(dims[4], dims[3], kernel_size=2, stride=2)
+        self.d21 = nn.Conv1d(dims[4], dims[3], kernel_size=3, padding=1)
+        self.conv_d21 = nn.Conv1d(fing_size,  dims[3]*2, kernel_size=3, padding=1) # output: 28x28x1024
+        self.d22 = nn.Conv1d(dims[3], dims[3], kernel_size=3, padding=1)
+        self.conv_d22 = nn.Conv1d(fing_size,  dims[3]*2, kernel_size=3, padding=1) # output: 28x28x1024
+
+        self.upconv3 = nn.ConvTranspose1d(dims[3], dims[2], kernel_size=2, stride=2)
+        self.d31 = nn.Conv1d(dims[3], dims[2], kernel_size=3, padding=1)
+        self.conv_d31 = nn.Conv1d(fing_size,  dims[2]*2, kernel_size=3, padding=1) # output: 28x28x1024
+        self.d32 = nn.Conv1d(dims[2], dims[2], kernel_size=3, padding=1)
+        self.conv_d32 = nn.Conv1d(fing_size,  dims[2]*2, kernel_size=3, padding=1) # output: 28x28x1024
+
+        self.upconv4 = nn.ConvTranspose1d(dims[2], dims[1], kernel_size=2, stride=2)
+        self.d41 = nn.Conv1d(dims[2], dims[1], kernel_size=3, padding=1)
+        self.conv_d41 = nn.Conv1d(fing_size,  dims[1]*2, kernel_size=3, padding=1) # output: 28x28x1024
+        self.d42 = nn.Conv1d(dims[1], dims[1], kernel_size=3, padding=1)
+        self.conv_d42 = nn.Conv1d(fing_size,  dims[1]*2, kernel_size=3, padding=1) # output: 28x28x1024
+
+        # Output layer
+        self.outconv = nn.Conv1d(dims[1], n_class, kernel_size=1)
+
+        self.relu = nn.ReLU()
+
+    def apply_film(self, x, watermark, conv):
+        watermark = watermark.unsqueeze(2)
+        a,b = torch.chunk(conv(watermark), chunks=2, dim=1)
+        # watermark = watermark.expand(-1, -1,x.size(2))
+        return x*a+b #TODO: appply sigmoid
+    
+    def forward(self, x, watermark):
+        # Encoder
+        xe11 = self.relu(self.e11(x))
+        xe11 = self.apply_film(xe11, watermark,self.conv_e11)
+        xe12 = self.relu(self.e12(xe11))
+        xe12 = self.apply_film(xe12, watermark, self.conv_e12)
+        xp1 = self.pool1(xe12)
+
+        xe21 = self.relu(self.e21(xp1))
+        xe21 = self.apply_film(xe21,watermark, self.conv_e21)
+        xe22 = self.relu(self.e22(xe21))
+        xe22 = self.apply_film(xe22, watermark,self.conv_e22)
+        xp2 = self.pool2(xe22)
+
+        xe31 = self.relu(self.e31(xp2))
+        xe31 = self.apply_film(xe31, watermark,self.conv_e31)
+        xe32 = self.relu(self.e32(xe31))
+        xe32 = self.apply_film(xe32, watermark,self.conv_e32)
+        xp3 = self.pool3(xe32)
+
+        xe41 = self.relu(self.e41(xp3))
+        xe41 = self.apply_film(xe41, watermark,self.conv_e41)
+        xe42 = self.relu(self.e42(xe41))
+        xe42 = self.apply_film(xe42, watermark, self.conv_e42)
+        xp4 = self.pool4(xe42)
+
+        xe51 = self.relu(self.e51(xp4))
+        xe51 = self.apply_film(xe51, watermark, self.conv_e51)
+        xe52 = self.relu(self.e52(xe51))
+        xe52 = self.apply_film(xe52, watermark, self.conv_e52)
+        
+        # Decoder
+        xu1 = self.upconv1(xe52)
+        xu11 = torch.cat([xu1, xe42], dim=1)
+        xd11 = self.relu(self.d11(xu11))
+        xd11 = self.apply_film(xd11, watermark, self.conv_d11)
+        xd12 = self.relu(self.d12(xd11))
+        xd12 = self.apply_film(xd12, watermark, self.conv_d12)
+
+        xu2 = self.upconv2(xd12)
+        xu22 = torch.cat([xu2, xe32], dim=1)
+        xd21 = self.relu(self.d21(xu22))
+        xd21 = self.apply_film(xd21, watermark, self.conv_d21)
+        xd22 = self.relu(self.d22(xd21))
+        xd22 = self.apply_film(xd22, watermark, self.conv_d22)
+
+        xu3 = self.upconv3(xd22)
+        xu33 = torch.cat([xu3, xe22], dim=1)
+        xd31 = self.relu(self.d31(xu33))
+        xd31 = self.apply_film(xd31, watermark, self.conv_d31)
+        xd32 = self.relu(self.d32(xd31))
+        xd32 = self.apply_film(xd32, watermark, self.conv_d32)
+
+        xu4 = self.upconv4(xd32)
+        xu44 = torch.cat([xu4, xe12], dim=1)
+        xd41 = self.relu(self.d41(xu44))
+        xd41 = self.apply_film(xd41, watermark, self.conv_d41)
+        xd42 = self.relu(self.d42(xd41))
+        xd42 = self.apply_film(xd42, watermark, self.conv_d42)
+
+        # Output layer
+        out = self.outconv(xd42)
+
+        return out

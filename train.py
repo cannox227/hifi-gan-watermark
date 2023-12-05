@@ -179,45 +179,16 @@ def train(rank, a, h):
             loss_gen_f, losses_gen_f = generator_loss(y_df_hat_g)
             loss_gen_s, losses_gen_s = generator_loss(y_ds_hat_g)
             
-
             # TODO: add watermark loss
 
 
             # Watermark
             optim_wm.zero_grad()
-            #print("y g hat: ",y_g_hat[0])
             fp_hat = wm_decoder(y_g_hat)
-            #wm_decoder(y_g_hat) 
-            #
-            #print(fp_hat[0])
-            #diff = torch.abs(fp_hat - fp_old)
-            #print(torch.sum(diff))
             fp_old = fp_hat
             fp_true = generator.bernoulli.get_original_fingerprint()
-            #print(fp_true)
-            #print("fp_hat", fp_hat)
-            #print("grads si no? ", fp_hat.requires_grad, fp_true.requires_grad)
-            # loss_wm = torch.zeros(1,).to(device)
-            # for b in range(fp_true.shape[0]):
-            #     for i, ck in enumerate(fp_true[b]):
-            #         loss_wm += ck * torch.log(fp_hat[b][i]) + (1-ck)*torch.log(1-(fp_hat[b][i]))
-            
-            # loss_wm = loss_wm.item()
-            # print("loss wm: ", loss_wm)
-            
-            #loss_wm = torch.nn.functional.binary_cross_entropy_with_logits(fp_hat, fp_true)#torch.mean(torch.abs(fp_hat-fp_true))
-            loss_wm = decoder_loss(fp_hat, fp_true)
+            loss_wm = decoder_loss(torch.sigmoid(fp_hat), fp_true) * 10
 
-            #print("loss wm require grad si no?", loss_wm.requires_grad)
-            #print("FP HAT SHAPE ", fp_hat.shape, " FP TRUE SHAPE ", fp_true.shape)
-            # print(f"""
-            #         loss_gen_s: {loss_gen_s}
-            #         loss_gen_f: {loss_gen_f}
-            #         loss_fm_s: {loss_fm_s}
-            #         loss_fm_f: {loss_fm_f}
-            #         loss_mel_f: {loss_mel}
-            #         loss_wm: {loss_wm}
-            #       """) 
 
 
             loss_gen_all = loss_gen_s + loss_gen_f + loss_fm_s + loss_fm_f + loss_mel + loss_wm
