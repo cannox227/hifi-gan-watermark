@@ -37,3 +37,6 @@ If you add a new library or modify any library version you can re-export module 
 
 ### Experiments script
     python3 audio2waveform.py
+
+### Validation
+    python3 validation.py --config <config_file.json> --checkpoint_path <model_folder>
