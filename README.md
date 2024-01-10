@@ -1,3 +1,18 @@
+# Embedding and retrieving watermark in generated audio
+This work is built on top HiFi-GAN repo (reported below).
+The description of the project can be found in `report.pdf`
+
+## Abstract
+This study emphasizes the importance of incorporating a watermark into generated
+audio content to enhance security and traceability. Four distinct encoder-decoder
+models were explored, drawing inspiration from the U-Net architecture. The
+presented models demonstrated the capability to embed fingerprints of lengths
+3, 4, 8, and 8 bits, respectively, without compromising the original audio quality.
+Among the models evaluated, the most successful one, achieving a bit accuracy of
+100%, was the one adept at handling 3-bit fingerprints.
+
+***
+
 # HiFi-GAN: Generative Adversarial Networks for Efficient and High Fidelity Speech Synthesis
 
 ### Jungil Kong, Jaehyeon Kim, Jaekyoung Bae
